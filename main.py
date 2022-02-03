@@ -2,15 +2,51 @@ import numpy as np
 import pandas as pd
 import uuid
 from sklearn.metrics import classification_report
+from IPython.display import display, HTML
+
+def not_equal_series(se_a: pd.Series, se_b: pd.Series) -> pd.Series:
+    """
+    Get a boolean selector that selects differences in two series.
+
+    We are careful working with missing values, as NaN == NaN resolves to
+    False.
+    """
+    fill = str(uuid.uuid4())
+    return se_a.fillna(fill) != se_b.fillna(fill)
+
 
 class Inspector:
+    """
+
+    Given a clean column, a dirty column and a column with cleaning
+    suggestions, Inspector creates a cleaning report or lets you inspect
+    single cleaning suggestions and their contexts more closely.
+
+    All series are expected to be sorted in the same way. The series' index
+    identifies each value uniquely.
+
+    :param y_clean: pandas series containing the cleaned data (ground truth).
+    :param y_dirty: pandas series containing the dirty data.
+    :param y_pred: pandas series containing the cleaning suggestions.
+    "param assume_errors_known: boolean, if true then we assume that all error
+                                positions are known upfront.
+
+    """
     def __init__(self,
+                 y_clean: pd.Series,
+                 y_dirty: pd.Series,
+                 y_pred: pd.Series,
                  assume_errors_known: bool = True):
         self.assume_errors_known = assume_errors_known
 
-        self._error_positions = None
-        self._predicted_error_positions = None
-        self._cleaning_error_positions = None
+        # "true" error positions in y_dirty according to y_clean
+        self._error_positions = not_equal_series(y_clean, y_dirty)
+
+        # predicted error positions in y_dirty according to y_pred
+        self._predicted_error_positions = not_equal_series(y_dirty, y_pred)
+
+        # positions where the data has been incorrectly cleaned
+        self._cleaning_error_positions = not_equal_series(y_clean, y_pred)
 
     def cleaning_report(self):
         """
@@ -19,55 +55,47 @@ class Inspector:
         """
         pass
 
-    def compare_series(self, se_a, se_b):
-        """
-        Get a boolean selector that selects differences in two series.
-
-        We are careful working with missing values, as NaN == NaN resolves to
-        False.
-        """
-        # This makes comparison operations work for missing values.
-        fill = str(uuid.uuid4())
-        return se_a.fillna(fill) != se_b.fillna(fill)
-
-    def calculate_error_positions(self, y_clean: pd.Series, y_dirty: pd.Series):
-        """
-        Calculates error positions in the dirty series by comparing the dirty
-        series to a series containing the ground truth (y_clean).
-        """
-        self._error_positions = self.compare_series(y_clean, y_dirty)
-
-
-    def calculate_cleaning_error_positions(self,
-                                           y_clean: pd.Series,
-                                           y_pred: pd.Series):
-        """
-        Calculates error positions in the predicted series by comparing the
-        predicted series to a series containing the ground truth (y_clean).
-        """
-        self._cleaning_error_positions = self.compare_series(y_clean, y_pred)
-
     def inspect_cleaning_results(self,
                                  df_clean: pd.DataFrame,
                                  df_pred: pd.DataFrame,
                                  df_dirty: pd.DataFrame,
-                                 context_selector,
+                                 context_col_selector,
                                  context_height: int = 3):
-
+        """
+        A magical function that integrates with IPython to make inspecting
+        cleaning mistakes more fun.
+        """
         error_indices = self._cleaning_error_positions.index[self._cleaning_error_positions == True]
         for i, pos in enumerate(error_indices):
-            row_start, row_end = pos-context_height, pos+context_height
-            print(f"Evaluating error {i} from {len(self._cleaning_error_positions)}")
+            print(f"Evaluating error {i+1} from {len(error_indices)}")
             print(f"Error in row {pos}:")
-            print(df_dirty.iloc[row_start:row_end, :].loc[:, context_selector])
-            print(f"Cleaning result in row {pos}:")
-            print(df_pred.iloc[row_start:row_end, :].loc[:, context_selector])
-            print(f"Groud truth in row {pos}:")
-            print(df_clean.iloc[row_start:row_end, :].loc[:, context_selector])
+
+            row_start, row_end = pos-context_height, pos+context_height
+            highlight_row = lambda x: ['background: lightgreen' if x.name == pos
+                else '' for _ in x]
+            clean_context = df_clean.iloc[row_start:row_end, :].loc[:, context_col_selector]
+            dirty_context = df_dirty.iloc[row_start:row_end, :].loc[:, context_col_selector]
+            pred_context = df_pred.iloc[row_start:row_end, :].loc[:, context_col_selector]
+
+            clean_context = clean_context.style.apply(highlight_row, axis=1).to_html()
+            dirty_context = dirty_context.style.apply(highlight_row, axis=1).to_html()
+            pred_context = pred_context.style.apply(highlight_row, axis=1).to_html()
+
+            display(HTML('<hr>'))
+            display(HTML('<h3>Clean Data</h3>'))
+            display(HTML(clean_context))
+            display(HTML('<h3>Dirty Data</h3>'))
+            display(HTML(dirty_context))
+            display(HTML('<h3>Predicted Data</h3>'))
+            display(HTML(pred_context))
+            display(HTML('<hr>'))
+            wants_more = input('Enter to continue, any input to abort')
+            if wants_more != '':
+                break
 
 
 
-    def cleaning_performance(self,
+    def error_cleaning_performance(self,
                              y_clean: pd.Series,
                              y_pred: pd.Series,
                              y_dirty: pd.Series):
@@ -106,14 +134,10 @@ class Inspector:
         return f1_score
 
 
-    def error_detection_performance(self,
-                                    y_pred: pd.Series,
-                                    y_dirty: pd.Series):
+    def error_detection_performance(self):
         """
         Calculate the f1-score for finding the correct position of errors in
         y_dirty.
         """
-        self._predicted_error_positions = y_dirty != y_pred
-
-        report = classification_report(self._error_positions, self._predicted_error_positions)
-        return report
+        return classification_report(self._error_positions,
+                                     self._predicted_error_positions)
