@@ -67,9 +67,6 @@ class Inspector:
         """
         error_indices = self._cleaning_error_positions.index[self._cleaning_error_positions == True]
         for i, pos in enumerate(error_indices):
-            print(f"Evaluating error {i+1} from {len(error_indices)}")
-            print(f"Error in row {pos}:")
-
             row_start, row_end = pos-context_height, pos+context_height
             highlight_row = lambda x: ['background: lightgreen' if x.name == pos
                 else '' for _ in x]
@@ -81,14 +78,20 @@ class Inspector:
             dirty_context = dirty_context.style.apply(highlight_row, axis=1).to_html()
             pred_context = pred_context.style.apply(highlight_row, axis=1).to_html()
 
-            display(HTML('<hr>'))
-            display(HTML('<h3>Clean Data</h3>'))
-            display(HTML(clean_context))
-            display(HTML('<h3>Dirty Data</h3>'))
-            display(HTML(dirty_context))
-            display(HTML('<h3>Predicted Data</h3>'))
-            display(HTML(pred_context))
-            display(HTML('<hr>'))
+            display(HTML(f'''
+            <hr>
+            <p>Evaluating error <b>{i+1}/{len(error_indices)}</b>.
+            Error in <b>row {pos}</b>:</p>
+            <h4>Clean Data</h4>
+            {clean_context}
+            <br>
+            <h4>Dirty Data</h4>
+            {dirty_context}
+            <br>
+            <h4>Predicted Data</h4>
+            {pred_context}
+            <hr>
+            '''))
             wants_more = input('Enter to continue, any input to abort')
             if wants_more != '':
                 break
